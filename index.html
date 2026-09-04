@@ -91,7 +91,12 @@
   .col-header { text-align: center; font-size: 14px; font-weight: 600; padding: 4px 4px 8px; color: var(--text); }
   .col-header .sub { font-size: 11px; color: var(--text-muted); font-weight: 400; }
 
-  .grid-body { display: grid; position: relative; }
+  .grid-body { display: flex; flex-direction: column; gap: 5px; }
+  .segment-grid { display: grid; position: relative; }
+  .break-row {
+    text-align: center; font-size: 11.5px; font-weight: 500; color: var(--text-muted);
+    background: var(--bg); border-radius: 6px; padding: 5px 0; letter-spacing: 0.2px;
+  }
   .time-col { position: relative; }
   .time-label { position: absolute; right: 10px; font-size: 12px; color: var(--text-muted); transform: translateY(-50%); }
 
@@ -195,6 +200,13 @@ const ROOMS = [
   { key: '회의실1', label: '회의실1', sub: '영업 앞' },
   { key: '회의실2', label: '회의실2', sub: '접견실 옆' },
 ];
+// 예약 가능한 시간 구간 (점심/저녁시간 제외)
+const SEGMENTS = [
+  { startHour: 8, endHour: 12 },
+  { startHour: 13, endHour: 17 },
+  { startHour: 18, endHour: 20 },
+];
+const BREAK_AFTER = ['점심시간', '저녁시간', null]; // 각 세그먼트 뒤에 표시할 구분 라벨
 
 function userInfo(name) { return USERS.find(u => u.name === name); }
 
@@ -361,53 +373,63 @@ function renderView() {
     return '<div class="col-header"><span'+titleStyle+'>'+c.title+'</span>'+(c.sub ? '<span class="sub"><br>'+c.sub+'</span>' : '')+'</div>';
   }).join('');
 
-  // 바디
+  // 바디: 예약 가능 구간(SEGMENTS)별로 나눠서 그리고, 그 사이에 점심/저녁 구분줄 삽입
   const gridBody = document.getElementById('gridBody');
-  gridBody.style.gridTemplateColumns = '44px repeat('+columns.length+', minmax(0, 1fr))';
   gridBody.innerHTML = '';
+  const segmentsMeta = [];
 
-  const timeCol = document.createElement('div');
-  timeCol.className = 'time-col';
-  timeCol.style.height = GRID_HEIGHT + 'px';
-  for (let h = START_HOUR; h <= END_HOUR; h++) {
-    const slot = (h - START_HOUR) * 2;
-    const lab = document.createElement('div');
-    lab.className = 'time-label';
-    lab.style.top = (slot*PPS) + 'px';
-    lab.textContent = String(h).padStart(2,'0') + ':00';
-    timeCol.appendChild(lab);
-  }
-  gridBody.appendChild(timeCol);
+  SEGMENTS.forEach((seg, idx) => {
+    const segSlots = (seg.endHour - seg.startHour) * 2;
+    const segHeight = segSlots * PPS;
+    const baseSlot = (seg.startHour - START_HOUR) * 2;
 
-  columns.forEach(col => {
-    const div = document.createElement('div');
-    div.className = 'day-col';
-    div.style.height = GRID_HEIGHT + 'px';
-    div.style.backgroundImage = 'repeating-linear-gradient(to bottom, var(--border) 0 1px, transparent 1px '+(PPS*2)+'px)';
-    div.dataset.room = col.room;
-    div.dataset.daybase = col.dayBase.getTime();
-    gridBody.appendChild(div);
-    attachDragHandlers(div, col);
+    const wrap = document.createElement('div');
+    wrap.className = 'segment-grid';
+    wrap.style.gridTemplateColumns = '44px repeat('+columns.length+', minmax(0, 1fr))';
+
+    const timeCol = document.createElement('div');
+    timeCol.className = 'time-col';
+    timeCol.style.height = segHeight + 'px';
+    for (let h = seg.startHour; h <= seg.endHour; h++) {
+      const slot = (h - seg.startHour) * 2;
+      const lab = document.createElement('div');
+      lab.className = 'time-label';
+      lab.style.top = (slot*PPS) + 'px';
+      lab.textContent = String(h).padStart(2,'0') + ':00';
+      timeCol.appendChild(lab);
+    }
+    wrap.appendChild(timeCol);
+
+    const colEls = [];
+    columns.forEach(col => {
+      const div = document.createElement('div');
+      div.className = 'day-col';
+      div.style.height = segHeight + 'px';
+      div.style.backgroundImage = 'repeating-linear-gradient(to bottom, var(--border) 0 1px, transparent 1px '+(PPS*2)+'px)';
+      div.dataset.room = col.room;
+      div.dataset.daybase = col.dayBase.getTime();
+      wrap.appendChild(div);
+      attachDragHandlers(div, col, baseSlot, segSlots);
+      colEls.push(div);
+    });
+
+    gridBody.appendChild(wrap);
+    segmentsMeta.push({ baseSlot, segSlots, colEls });
+
+    const breakLabel = BREAK_AFTER[idx];
+    if (breakLabel) {
+      const br = document.createElement('div');
+      br.className = 'break-row';
+      br.textContent = breakLabel;
+      gridBody.appendChild(br);
+    }
   });
 
-  addBreakLine(gridBody, (12 - START_HOUR) * 2, '점심시간');
-  addBreakLine(gridBody, (17 - START_HOUR) * 2, '저녁시간');
-
-  fetchAndRenderBookings(columns);
-}
-
-function addBreakLine(gridBody, slot, label) {
-  const line = document.createElement('div');
-  line.style.cssText = 'position:absolute; left:44px; right:0; top:'+(slot*PPS)+'px; border-top:1px dashed #c3c8d1; pointer-events:none; z-index:1;';
-  gridBody.appendChild(line);
-  const lab = document.createElement('span');
-  lab.textContent = label;
-  lab.style.cssText = 'position:absolute; left:50px; top:'+(slot*PPS-8)+'px; font-size:10px; color:var(--text-muted); background:var(--surface); padding:0 5px; z-index:1; pointer-events:none;';
-  gridBody.appendChild(lab);
+  fetchAndRenderBookings(columns, segmentsMeta);
 }
 
 // ---------- 데이터 조회 ----------
-async function fetchAndRenderBookings(columns) {
+async function fetchAndRenderBookings(columns, segmentsMeta) {
   let rangeStart, rangeEnd, roomFilter = null;
   if (view === 'day') {
     rangeStart = startOfDay(currentDate);
@@ -425,41 +447,55 @@ async function fetchAndRenderBookings(columns) {
   const { data, error } = await query;
   if (error) { console.error(error); bookings = []; }
   else bookings = data || [];
-  renderBookingBars(columns);
+  renderBookingBars(segmentsMeta);
 }
 
-function renderBookingBars(columns) {
-  document.querySelectorAll('.day-col').forEach(colEl => {
-    colEl.querySelectorAll('.booking-bar').forEach(el => el.remove());
-    const room = colEl.dataset.room;
-    const dayBase = new Date(Number(colEl.dataset.daybase));
-    const dayEnd = addDays(dayBase, 1);
-    bookings
-      .filter(b => b.room === room)
-      .forEach(b => {
-        const s = new Date(b.start_ts), e = new Date(b.end_ts);
-        if (e <= dayBase || s >= dayEnd) return; // 이 컬럼(날짜) 범위 밖
-        const startSlot = Math.max(0, dateToSlot(s < dayBase ? dayBase : s, dayBase));
-        const endSlot = Math.min(TOTAL_SLOTS, dateToSlot(e > dayEnd ? dayEnd : e, dayBase));
-        const u = userInfo(b.user_name);
-        const bar = document.createElement('div');
-        bar.className = 'booking-bar';
-        bar.style.top = (startSlot*PPS) + 'px';
-        bar.style.height = Math.max(PPS-3, (endSlot-startSlot)*PPS-3) + 'px';
-        bar.style.background = u.bg;
-        bar.style.color = u.fg;
-        bar.innerHTML = (endSlot - startSlot <= 1)
-          ? u.name
-          : u.name + '<span class="time">'+ fmtTime(s) +'-'+ fmtTime(e) +'</span>';
-        bar.onclick = (ev) => {
-          ev.stopPropagation();
-          if (confirm(u.name+'님의 예약을 취소할까요? ('+fmtTime(s)+'-'+fmtTime(e)+', '+room+')')) {
-            deleteBooking(b.id);
-          }
-        };
-        colEl.appendChild(bar);
-      });
+function renderBookingBars(segmentsMeta) {
+  segmentsMeta.forEach(seg => {
+    seg.colEls.forEach(colEl => {
+      colEl.querySelectorAll('.booking-bar').forEach(el => el.remove());
+      const room = colEl.dataset.room;
+      const dayBase = new Date(Number(colEl.dataset.daybase));
+      const dayEnd = addDays(dayBase, 1);
+      const lo = seg.baseSlot, hi = seg.baseSlot + seg.segSlots;
+      bookings
+        .filter(b => b.room === room)
+        .forEach(b => {
+          const s = new Date(b.start_ts), e = new Date(b.end_ts);
+          if (e <= dayBase || s >= dayEnd) return; // 이 컬럼(날짜) 범위 밖
+          const startSlotAbs = Math.max(0, dateToSlot(s < dayBase ? dayBase : s, dayBase));
+          const endSlotAbs = Math.min(TOTAL_SLOTS, dateToSlot(e > dayEnd ? dayEnd : e, dayBase));
+          const clipStart = Math.max(startSlotAbs, lo);
+          const clipEnd = Math.min(endSlotAbs, hi);
+          if (clipEnd <= clipStart) return; // 이 구간(세그먼트)과 안 겹침
+          const localStart = clipStart - lo, localEnd = clipEnd - lo;
+          const u = userInfo(b.user_name);
+          const titleLine = escapeHtml(u.name + (b.memo ? ' ' + b.memo : ''));
+          const bar = document.createElement('div');
+          bar.className = 'booking-bar';
+          bar.style.top = (localStart*PPS) + 'px';
+          bar.style.height = Math.max(PPS-3, (localEnd-localStart)*PPS-3) + 'px';
+          bar.style.background = u.bg;
+          bar.style.color = u.fg;
+          bar.innerHTML = (endSlotAbs - startSlotAbs <= 1)
+            ? titleLine
+            : titleLine + '<span class="time">'+ fmtTime(s) +'-'+ fmtTime(e) +'</span>';
+          bar.onclick = (ev) => {
+            ev.stopPropagation();
+            const desc = (b.memo ? b.memo+', ' : '') + fmtTime(s)+'-'+fmtTime(e)+', '+room;
+            if (confirm(u.name+'님의 예약을 취소할까요? ('+desc+')')) {
+              deleteBooking(b.id);
+            }
+          };
+          colEl.appendChild(bar);
+        });
+    });
   });
+}
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
 }
 function fmtTime(d) { return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'); }
 
@@ -473,16 +509,16 @@ async function deleteBooking(id) {
 let dragState = null;
 let previewEl = null;
 
-function yToSlot(el, clientY) {
+function yToSlot(el, clientY, maxSlot) {
   const rect = el.getBoundingClientRect();
   const y = clientY - rect.top;
-  return Math.max(0, Math.min(TOTAL_SLOTS, Math.round(y / PPS)));
+  return Math.max(0, Math.min(maxSlot, Math.round(y / PPS)));
 }
 
-function attachDragHandlers(colEl, colInfo) {
+function attachDragHandlers(colEl, colInfo, baseSlot, segSlots) {
   const start = (clientY) => {
-    const slot = yToSlot(colEl, clientY);
-    dragState = { colEl, colInfo, startSlot: slot, curSlot: slot };
+    const slot = yToSlot(colEl, clientY, segSlots);
+    dragState = { colEl, colInfo, baseSlot, segSlots, startSlot: slot, curSlot: slot };
     previewEl = document.createElement('div');
     previewEl.className = 'preview-bar';
     colEl.appendChild(previewEl);
@@ -503,38 +539,42 @@ function updatePreview() {
 
 document.addEventListener('mousemove', e => {
   if (!dragState) return;
-  dragState.curSlot = yToSlot(dragState.colEl, e.clientY);
+  dragState.curSlot = yToSlot(dragState.colEl, e.clientY, dragState.segSlots);
   updatePreview();
 });
 document.addEventListener('touchmove', e => {
   if (!dragState) return;
-  dragState.curSlot = yToSlot(dragState.colEl, e.touches[0].clientY);
+  dragState.curSlot = yToSlot(dragState.colEl, e.touches[0].clientY, dragState.segSlots);
   updatePreview();
 }, {passive:true});
 
 function endDrag() {
   if (!dragState) return;
-  const s = Math.min(dragState.startSlot, dragState.curSlot);
-  const eRaw = Math.max(dragState.startSlot, dragState.curSlot);
-  const e = eRaw === s ? s+1 : eRaw;
+  const sLocal = Math.min(dragState.startSlot, dragState.curSlot);
+  const eRawLocal = Math.max(dragState.startSlot, dragState.curSlot);
+  const eLocal = eRawLocal === sLocal ? sLocal+1 : eRawLocal;
   const colInfo = dragState.colInfo;
+  const baseSlot = dragState.baseSlot;
   if (previewEl) { previewEl.remove(); previewEl = null; }
   dragState = null;
 
-  const startDate = slotToDate(colInfo.dayBase, s);
-  const endDate = slotToDate(colInfo.dayBase, e);
+  const startDate = slotToDate(colInfo.dayBase, baseSlot + sLocal);
+  const endDate = slotToDate(colInfo.dayBase, baseSlot + eLocal);
   const overlap = bookings.some(b => b.room === colInfo.room &&
     startDate < new Date(b.end_ts) && endDate > new Date(b.start_ts));
   if (overlap) { alert('이미 예약된 시간대와 겹칩니다.'); return; }
 
-  confirmBooking(colInfo, startDate, endDate, currentUser);
+  const memoInput = prompt('메모 (선택사항, 예: 구매)');
+  if (memoInput === null) return; // 취소 누르면 등록 안 함
+  const memo = memoInput.trim().slice(0, 30);
+  confirmBooking(colInfo, startDate, endDate, currentUser, memo);
 }
 document.addEventListener('mouseup', endDrag);
 document.addEventListener('touchend', endDrag);
 
-async function confirmBooking(colInfo, startDate, endDate, userName) {
+async function confirmBooking(colInfo, startDate, endDate, userName, memo) {
   const { error } = await sb.from('reservations').insert({
-    room: colInfo.room, user_name: userName,
+    room: colInfo.room, user_name: userName, memo: memo || null,
     start_ts: startDate.toISOString(), end_ts: endDate.toISOString()
   });
   if (error) {
