@@ -390,7 +390,20 @@ function renderView() {
     attachDragHandlers(div, col);
   });
 
+  addBreakLine(gridBody, (12 - START_HOUR) * 2, '점심시간');
+  addBreakLine(gridBody, (17 - START_HOUR) * 2, '저녁시간');
+
   fetchAndRenderBookings(columns);
+}
+
+function addBreakLine(gridBody, slot, label) {
+  const line = document.createElement('div');
+  line.style.cssText = 'position:absolute; left:44px; right:0; top:'+(slot*PPS)+'px; border-top:1px dashed #c3c8d1; pointer-events:none; z-index:1;';
+  gridBody.appendChild(line);
+  const lab = document.createElement('span');
+  lab.textContent = label;
+  lab.style.cssText = 'position:absolute; left:50px; top:'+(slot*PPS-8)+'px; font-size:10px; color:var(--text-muted); background:var(--surface); padding:0 5px; z-index:1; pointer-events:none;';
+  gridBody.appendChild(lab);
 }
 
 // ---------- 데이터 조회 ----------
