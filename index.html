@@ -435,7 +435,9 @@ function renderBookingBars(columns) {
         bar.style.height = Math.max(PPS-3, (endSlot-startSlot)*PPS-3) + 'px';
         bar.style.background = u.bg;
         bar.style.color = u.fg;
-        bar.innerHTML = u.name + '<span class="time">'+ fmtTime(s) +'-'+ fmtTime(e) +'</span>';
+        bar.innerHTML = (endSlot - startSlot <= 1)
+          ? u.name
+          : u.name + '<span class="time">'+ fmtTime(s) +'-'+ fmtTime(e) +'</span>';
         bar.onclick = (ev) => {
           ev.stopPropagation();
           if (confirm(u.name+'님의 예약을 취소할까요? ('+fmtTime(s)+'-'+fmtTime(e)+', '+room+')')) {
