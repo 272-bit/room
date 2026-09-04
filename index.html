@@ -115,18 +115,6 @@
     pointer-events: none; background: rgba(44,69,112,0.08);
   }
 
-  .pending-panel {
-    margin-top: 18px; padding: 18px; background: var(--surface); border: 1px solid var(--border);
-    border-radius: var(--radius-md); box-shadow: var(--shadow-md);
-  }
-  .pending-panel .label { font-size: 15px; font-weight: 500; margin: 0 0 12px; }
-  .pending-names { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
-  .pending-names button {
-    padding: 10px 18px; border-radius: 999px; border: none; font-size: 14px; font-weight: 600; cursor: pointer; color: #fff;
-  }
-  .pending-cancel { background: var(--bg); border: none; border-radius: 999px; padding: 9px 18px; font-size: 13px; cursor: pointer; color: var(--text-muted); }
-  .pending-cancel:hover { color: var(--text); }
-
   .hint { font-size: 12.5px; color: var(--text-muted); margin-top: 16px; text-align: center; }
 </style>
 </head>
@@ -166,22 +154,13 @@
     </div>
   </div>
 
-  <div class="pending-panel" id="pendingPanel" style="display:none;">
-    <p class="label" id="pendingLabel"></p>
-    <div class="pending-names" id="pendingNames"></div>
-    <button class="pending-cancel" id="pendingCancel">취소</button>
-  </div>
-
-  <p class="hint">빈 공간을 눌러서 아래로 끌면 시간대가 선택됩니다 (30분 단위). 예약 막대를 누르면 취소할 수 있습니다.</p>
+  <p class="hint">빈 공간을 눌러서 아래로 끌면 현재 선택된 본인 이름으로 예약됩니다 (30분 단위). 다른 사람 걸로 등록하려면 위에서 사용자를 먼저 바꾸세요. 예약 막대를 누르면 취소할 수 있습니다.</p>
 </div>
 
+<script src="config.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
-// ====== 여기 두 값만 채우세요 (Supabase 프로젝트 설정 > API) ======
-const SUPABASE_URL = 'https://bkxdmkvcckawdprhjctd.supabase.co';
-const SUPABASE_ANON_KEY = 'sb_publishable_YGr6WQNo4I8GOFb_VnFfbQ_XsfR-vEr';
-// ================================================================
-
+// SUPABASE_URL, SUPABASE_ANON_KEY는 config.js에서 불러옵니다. (이 파일에서 수정 X)
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 const START_HOUR = 8;
@@ -237,6 +216,13 @@ function slotToDate(dayBase, slot) {
   const totalMin = START_HOUR*60 + slot*30;
   return new Date(dayBase.getTime() + totalMin*60000);
 }
+function weekdayColor(d) {
+  const day = d.getDay();
+  if (day === 0) return '#e5484d'; // 일요일 - 빨강
+  if (day === 6) return '#4a90d9'; // 토요일 - 연한 파랑
+  return null;
+}
+
 function fmtDateLabel(d) {
   return new Intl.DateTimeFormat('ko-KR', { month:'long', day:'numeric', weekday:'short' }).format(d);
 }
@@ -341,6 +327,7 @@ function renderView() {
         return fmtDateLabel(s) + ' ~ ' + fmtDateLabel(e);
       })();
   document.getElementById('navLabel').textContent = label;
+  document.getElementById('navLabel').style.color = (view === 'day' ? weekdayColor(currentDate) : null) || 'var(--text)';
 
   const columns = view === 'day'
     ? ROOMS.map(r => ({ key: r.key, title: r.label, sub: r.sub, dayBase: startOfDay(currentDate), room: r.key }))
@@ -356,9 +343,11 @@ function renderView() {
   // 헤더
   const colHeaders = document.getElementById('colHeaders');
   colHeaders.style.gridTemplateColumns = '56px repeat('+columns.length+', minmax(90px, 1fr))';
-  colHeaders.innerHTML = '<div></div>' + columns.map(c =>
-    '<div class="col-header">'+c.title+(c.sub ? '<span class="sub"><br>'+c.sub+'</span>' : '')+'</div>'
-  ).join('');
+  colHeaders.innerHTML = '<div></div>' + columns.map(c => {
+    const color = view === 'week' ? weekdayColor(c.dayBase) : null;
+    const titleStyle = color ? ' style="color:'+color+'"' : '';
+    return '<div class="col-header"><span'+titleStyle+'>'+c.title+'</span>'+(c.sub ? '<span class="sub"><br>'+c.sub+'</span>' : '')+'</div>';
+  }).join('');
 
   // 바디
   const gridBody = document.getElementById('gridBody');
@@ -511,40 +500,16 @@ function endDrag() {
     startDate < new Date(b.end_ts) && endDate > new Date(b.start_ts));
   if (overlap) { alert('이미 예약된 시간대와 겹칩니다.'); return; }
 
-  showPending(colInfo, startDate, endDate);
+  confirmBooking(colInfo, startDate, endDate, currentUser);
 }
 document.addEventListener('mouseup', endDrag);
 document.addEventListener('touchend', endDrag);
-
-function showPending(colInfo, startDate, endDate) {
-  const panel = document.getElementById('pendingPanel');
-  panel.style.display = 'block';
-  const roomLabel = ROOMS.find(r => r.key === colInfo.room).label;
-  document.getElementById('pendingLabel').textContent =
-    roomLabel + ' · ' + fmtDateLabel(startDate) + ' ' + fmtTime(startDate) + '-' + fmtTime(endDate);
-
-  const namesWrap = document.getElementById('pendingNames');
-  namesWrap.innerHTML = '';
-  // 본인 이름 버튼을 앞에 강조 배치
-  const ordered = [userInfo(currentUser), ...USERS.filter(u => u.name !== currentUser)];
-  ordered.forEach(u => {
-    const b = document.createElement('button');
-    b.textContent = u.name === currentUser ? (u.name + ' (나)') : u.name;
-    b.style.background = u.bg;
-    b.onclick = () => confirmBooking(colInfo, startDate, endDate, u.name);
-    namesWrap.appendChild(b);
-  });
-}
-document.getElementById('pendingCancel').onclick = () => {
-  document.getElementById('pendingPanel').style.display = 'none';
-};
 
 async function confirmBooking(colInfo, startDate, endDate, userName) {
   const { error } = await sb.from('reservations').insert({
     room: colInfo.room, user_name: userName,
     start_ts: startDate.toISOString(), end_ts: endDate.toISOString()
   });
-  document.getElementById('pendingPanel').style.display = 'none';
   if (error) {
     alert(error.message.includes('exclude') || error.code === '23P01'
       ? '방금 다른 사람이 같은 시간대를 예약했습니다. 새로고침 후 다시 시도해주세요.'
