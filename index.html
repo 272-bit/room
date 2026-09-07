@@ -177,6 +177,13 @@
 <div id="editOverlay" style="display:none; position:fixed; inset:0; background:rgba(20,25,40,0.4); z-index:50; align-items:center; justify-content:center; padding:20px;">
   <div style="background:var(--surface); border-radius:var(--radius-md); padding:20px; width:100%; max-width:360px; box-shadow:var(--shadow-md);">
     <p id="editInfo" style="font-size:14px; color:var(--text-muted); margin:0 0 12px; font-weight:500;"></p>
+    <div style="display:flex; gap:8px; margin-bottom:10px;">
+      <input id="editStartInput" type="time" step="1800" min="08:00" max="20:00"
+        style="flex:1; padding:9px 10px; border:1px solid var(--border); border-radius:8px; font-size:15px; font-family:inherit;" />
+      <span style="align-self:center; color:var(--text-muted);">~</span>
+      <input id="editEndInput" type="time" step="1800" min="08:00" max="20:00"
+        style="flex:1; padding:9px 10px; border:1px solid var(--border); border-radius:8px; font-size:15px; font-family:inherit;" />
+    </div>
     <input id="editMemoInput" type="text" maxlength="30" placeholder="메모 (선택사항)"
       style="width:100%; padding:11px 12px; border:1px solid var(--border); border-radius:8px; font-size:15px; margin-bottom:14px; box-sizing:border-box; font-family:inherit;" />
     <div style="display:flex; gap:8px;">
@@ -510,17 +517,32 @@ function escapeHtml(str) {
 
 // ---------- 예약 수정/삭제 모달 ----------
 let editingId = null;
+let editingRoom = null;
+let editingDayBase = null; // 그 날짜의 00:00 (날짜는 안 바꾸고 시간만 수정)
+
+function isInBreak(startDate, endDate) {
+  // 08-12, 13-17, 18-20 세그먼트 중 어느 하나에 완전히 포함되지 않으면 점심/저녁시간(또는 운영시간 밖)을 침범한 것
+  return !SEGMENTS.some(seg => {
+    const segStart = new Date(editingDayBase); segStart.setHours(seg.startHour,0,0,0);
+    const segEnd = new Date(editingDayBase); segEnd.setHours(seg.endHour,0,0,0);
+    return startDate >= segStart && endDate <= segEnd;
+  });
+}
+
 function openEditPanel(b, room, s, e) {
   editingId = b.id;
+  editingRoom = room;
+  editingDayBase = startOfDay(s);
   const u = userInfo(b.user_name);
-  document.getElementById('editInfo').textContent =
-    u.name + '님 · ' + room + ' · ' + fmtDateLabel(s) + ' ' + fmtTime(s) + '-' + fmtTime(e);
+  document.getElementById('editInfo').textContent = u.name + '님 · ' + room + ' · ' + fmtDateLabel(s);
+  document.getElementById('editStartInput').value = fmtTime(s);
+  document.getElementById('editEndInput').value = fmtTime(e);
   document.getElementById('editMemoInput').value = b.memo || '';
   document.getElementById('editOverlay').style.display = 'flex';
 }
 function closeEditPanel() {
   document.getElementById('editOverlay').style.display = 'none';
-  editingId = null;
+  editingId = null; editingRoom = null; editingDayBase = null;
 }
 document.getElementById('editCancelBtn').onclick = closeEditPanel;
 document.getElementById('editOverlay').onclick = (e) => {
@@ -528,8 +550,24 @@ document.getElementById('editOverlay').onclick = (e) => {
 };
 document.getElementById('editSaveBtn').onclick = async () => {
   if (!editingId) return;
+  const startStr = document.getElementById('editStartInput').value;
+  const endStr = document.getElementById('editEndInput').value;
+  if (!startStr || !endStr) { alert('시작/종료 시간을 입력해주세요.'); return; }
+  const [sh, sm] = startStr.split(':').map(Number);
+  const [eh, em] = endStr.split(':').map(Number);
+  const newStart = new Date(editingDayBase); newStart.setHours(sh, sm, 0, 0);
+  const newEnd = new Date(editingDayBase); newEnd.setHours(eh, em, 0, 0);
+
+  if (newEnd <= newStart) { alert('종료 시간이 시작 시간보다 늦어야 합니다.'); return; }
+  if (isInBreak(newStart, newEnd)) { alert('점심시간(12-13시)/저녁시간(17-18시)과 겹치거나 운영시간(08-20시)을 벗어났습니다.'); return; }
+  const overlap = bookings.some(b => b.id !== editingId && b.room === editingRoom &&
+    newStart < new Date(b.end_ts) && newEnd > new Date(b.start_ts));
+  if (overlap) { alert('다른 예약과 시간이 겹칩니다.'); return; }
+
   const memo = document.getElementById('editMemoInput').value.trim().slice(0, 30);
-  const { error } = await sb.from('reservations').update({ memo: memo || null }).eq('id', editingId);
+  const { error } = await sb.from('reservations')
+    .update({ memo: memo || null, start_ts: newStart.toISOString(), end_ts: newEnd.toISOString() })
+    .eq('id', editingId);
   if (error) { alert('저장 실패: ' + error.message); return; }
   closeEditPanel();
   renderView();
