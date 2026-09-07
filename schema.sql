@@ -22,10 +22,11 @@ alter table reservations enable row level security;
 -- (링크를 아는 6명만 쓴다는 전제. 더 강한 보안이 필요하면 알려주세요.)
 create policy "public read" on reservations for select using (true);
 create policy "public insert" on reservations for insert with check (true);
+create policy "public update" on reservations for update using (true) with check (true);
 create policy "public delete" on reservations for delete using (true);
 
 -- RLS 정책과 별개로, 테이블 자체에 대한 접근 권한도 명시적으로 부여
-grant select, insert, delete on reservations to anon, authenticated;
+grant select, insert, update, delete on reservations to anon, authenticated;
 
 -- 실시간 반영 활성화
 alter publication supabase_realtime add table reservations;
@@ -33,4 +34,8 @@ alter publication supabase_realtime add table reservations;
 -- ================================================================
 -- 기존 테이블에 memo 컬럼만 추가 (테이블을 이미 만들어놓은 경우 이 줄만 실행)
 -- alter table reservations add column if not exists memo text;
+--
+-- 기존 테이블에 수정(update) 권한 추가 (이미 테이블이 있다면 이 두 줄 실행)
+-- create policy "public update" on reservations for update using (true) with check (true);
+-- grant update on reservations to anon, authenticated;
 -- ================================================================

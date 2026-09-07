@@ -171,7 +171,20 @@
     </div>
   </div>
 
-  <p class="hint">빈 공간을 눌러서 아래로 끌면 현재 선택된 본인 이름으로 예약됩니다 (30분 단위). 다른 사람 걸로 등록하려면 위에서 사용자를 먼저 바꾸세요. 예약 막대를 누르면 취소할 수 있습니다.</p>
+  <p class="hint">빈 공간을 눌러서 아래로 끌면 현재 선택된 본인 이름으로 예약됩니다 (30분 단위). 다른 사람 걸로 등록하려면 위에서 사용자를 먼저 바꾸세요. 예약 막대를 누르면 수정·취소할 수 있습니다.</p>
+</div>
+
+<div id="editOverlay" style="display:none; position:fixed; inset:0; background:rgba(20,25,40,0.4); z-index:50; align-items:center; justify-content:center; padding:20px;">
+  <div style="background:var(--surface); border-radius:var(--radius-md); padding:20px; width:100%; max-width:360px; box-shadow:var(--shadow-md);">
+    <p id="editInfo" style="font-size:14px; color:var(--text-muted); margin:0 0 12px; font-weight:500;"></p>
+    <input id="editMemoInput" type="text" maxlength="30" placeholder="메모 (선택사항)"
+      style="width:100%; padding:11px 12px; border:1px solid var(--border); border-radius:8px; font-size:15px; margin-bottom:14px; box-sizing:border-box; font-family:inherit;" />
+    <div style="display:flex; gap:8px;">
+      <button id="editSaveBtn" style="flex:1; padding:11px; border:none; border-radius:8px; background:var(--navy); color:#fff; font-weight:600; font-size:14px; cursor:pointer;">저장</button>
+      <button id="editDeleteBtn" style="flex:1; padding:11px; border:none; border-radius:8px; background:#fbeaea; color:#c0392b; font-weight:600; font-size:14px; cursor:pointer;">예약 취소</button>
+    </div>
+    <button id="editCancelBtn" style="width:100%; margin-top:6px; padding:9px; border:none; background:none; color:var(--text-muted); font-size:13px; cursor:pointer;">닫기</button>
+  </div>
 </div>
 
 <script src="config.js"></script>
@@ -482,10 +495,7 @@ function renderBookingBars(segmentsMeta) {
             : titleLine + '<span class="time">'+ fmtTime(s) +'-'+ fmtTime(e) +'</span>';
           bar.onclick = (ev) => {
             ev.stopPropagation();
-            const desc = (b.memo ? b.memo+', ' : '') + fmtTime(s)+'-'+fmtTime(e)+', '+room;
-            if (confirm(u.name+'님의 예약을 취소할까요? ('+desc+')')) {
-              deleteBooking(b.id);
-            }
+            openEditPanel(b, room, s, e);
           };
           colEl.appendChild(bar);
         });
@@ -497,6 +507,39 @@ function escapeHtml(str) {
   div.textContent = str;
   return div.innerHTML;
 }
+
+// ---------- 예약 수정/삭제 모달 ----------
+let editingId = null;
+function openEditPanel(b, room, s, e) {
+  editingId = b.id;
+  const u = userInfo(b.user_name);
+  document.getElementById('editInfo').textContent =
+    u.name + '님 · ' + room + ' · ' + fmtDateLabel(s) + ' ' + fmtTime(s) + '-' + fmtTime(e);
+  document.getElementById('editMemoInput').value = b.memo || '';
+  document.getElementById('editOverlay').style.display = 'flex';
+}
+function closeEditPanel() {
+  document.getElementById('editOverlay').style.display = 'none';
+  editingId = null;
+}
+document.getElementById('editCancelBtn').onclick = closeEditPanel;
+document.getElementById('editOverlay').onclick = (e) => {
+  if (e.target.id === 'editOverlay') closeEditPanel();
+};
+document.getElementById('editSaveBtn').onclick = async () => {
+  if (!editingId) return;
+  const memo = document.getElementById('editMemoInput').value.trim().slice(0, 30);
+  const { error } = await sb.from('reservations').update({ memo: memo || null }).eq('id', editingId);
+  if (error) { alert('저장 실패: ' + error.message); return; }
+  closeEditPanel();
+  renderView();
+};
+document.getElementById('editDeleteBtn').onclick = async () => {
+  if (!editingId) return;
+  if (!confirm('이 예약을 취소할까요?')) return;
+  await deleteBooking(editingId);
+  closeEditPanel();
+};
 function fmtTime(d) { return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'); }
 
 async function deleteBooking(id) {
