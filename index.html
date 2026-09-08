@@ -428,6 +428,8 @@ function renderView() {
       div.style.backgroundImage = 'repeating-linear-gradient(to bottom, var(--border) 0 1px, transparent 1px '+(PPS*2)+'px)';
       div.dataset.room = col.room;
       div.dataset.daybase = col.dayBase.getTime();
+      div.dataset.baseslot = baseSlot;
+      div.dataset.segslots = segSlots;
       wrap.appendChild(div);
       attachDragHandlers(div, col, baseSlot, segSlots);
       colEls.push(div);
@@ -500,10 +502,7 @@ function renderBookingBars(segmentsMeta) {
           bar.innerHTML = (endSlotAbs - startSlotAbs <= 1)
             ? titleLine
             : titleLine + '<span class="time">'+ fmtTime(s) +'-'+ fmtTime(e) +'</span>';
-          bar.onclick = (ev) => {
-            ev.stopPropagation();
-            openEditPanel(b, room, s, e);
-          };
+          attachBarDragHandlers(bar, b, room, s, e);
           colEl.appendChild(bar);
         });
     });
@@ -514,6 +513,76 @@ function escapeHtml(str) {
   div.textContent = str;
   return div.innerHTML;
 }
+
+// ---------- 기존 예약 드래그 이동 ----------
+let barDragState = null;
+
+function attachBarDragHandlers(bar, b, room, s, e) {
+  const start = (clientX, clientY) => {
+    barDragState = { bookingId: b.id, booking: b, room, s, e, startX: clientX, startY: clientY, moved: false, ghost: null };
+  };
+  bar.addEventListener('mousedown', ev => { ev.stopPropagation(); start(ev.clientX, ev.clientY); });
+  bar.addEventListener('touchstart', ev => { ev.stopPropagation(); const t = ev.touches[0]; start(t.clientX, t.clientY); }, {passive:true});
+}
+
+function barMove(clientX, clientY) {
+  if (!barDragState) return;
+  const dx = clientX - barDragState.startX, dy = clientY - barDragState.startY;
+  if (!barDragState.moved && Math.hypot(dx, dy) > 8) {
+    barDragState.moved = true;
+    const ghost = document.createElement('div');
+    ghost.textContent = userInfo(barDragState.booking.user_name).name + ' 이동 중';
+    ghost.style.cssText = 'position:fixed; pointer-events:none; z-index:100; padding:6px 12px; border-radius:8px; background:var(--navy); color:#fff; font-size:12px; font-weight:600; box-shadow:var(--shadow-md); transform:translate(-50%,-140%);';
+    document.body.appendChild(ghost);
+    barDragState.ghost = ghost;
+  }
+  if (barDragState.moved && barDragState.ghost) {
+    barDragState.ghost.style.left = clientX + 'px';
+    barDragState.ghost.style.top = clientY + 'px';
+  }
+}
+document.addEventListener('mousemove', e => barMove(e.clientX, e.clientY));
+document.addEventListener('touchmove', e => { if (barDragState) barMove(e.touches[0].clientX, e.touches[0].clientY); }, {passive:true});
+
+async function barUp(clientX, clientY) {
+  if (!barDragState) return;
+  const st = barDragState;
+  barDragState = null;
+  if (st.ghost) st.ghost.remove();
+
+  if (!st.moved) {
+    openEditPanel(st.booking, st.room, st.s, st.e);
+    return;
+  }
+
+  const el = document.elementFromPoint(clientX, clientY);
+  const dayColEl = el ? el.closest('.day-col') : null;
+  if (!dayColEl) return; // 유효하지 않은 곳에 놓음 - 원래 자리 유지
+
+  const baseSlot = Number(dayColEl.dataset.baseslot);
+  const segSlots = Number(dayColEl.dataset.segslots);
+  const targetRoom = dayColEl.dataset.room;
+  const targetDayBase = new Date(Number(dayColEl.dataset.daybase));
+  const durationSlots = Math.round((st.e - st.s) / (30*60000));
+  const rect = dayColEl.getBoundingClientRect();
+  const rawSlot = Math.round((clientY - rect.top) / PPS);
+  const localSlot = Math.max(0, Math.min(segSlots - durationSlots, rawSlot));
+
+  const newStart = slotToDate(targetDayBase, baseSlot + localSlot);
+  const newEnd = slotToDate(targetDayBase, baseSlot + localSlot + durationSlots);
+
+  const overlap = bookings.some(b => b.id !== st.bookingId && b.room === targetRoom &&
+    newStart < new Date(b.end_ts) && newEnd > new Date(b.start_ts));
+  if (overlap) { alert('그 시간대는 이미 예약되어 있습니다.'); return; }
+
+  const { error } = await sb.from('reservations')
+    .update({ room: targetRoom, start_ts: newStart.toISOString(), end_ts: newEnd.toISOString() })
+    .eq('id', st.bookingId);
+  if (error) { alert('이동 실패: ' + error.message); return; }
+  renderView();
+}
+document.addEventListener('mouseup', e => barUp(e.clientX, e.clientY));
+document.addEventListener('touchend', e => { const t = e.changedTouches[0]; barUp(t.clientX, t.clientY); });
 
 // ---------- 예약 수정/삭제 모달 ----------
 let editingId = null;
