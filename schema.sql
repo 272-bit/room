@@ -6,7 +6,7 @@ create extension if not exists btree_gist;
 
 create table if not exists reservations (
   id uuid primary key default gen_random_uuid(),
-  room text not null check (room in ('대회의실','일정','회의실1','회의실2')),
+  room text not null check (room in ('일정','대회의실','회의실1','회의실2')),
   user_name text not null check (user_name in ('KJ','YG','JH','JR','HK','SY')),
   memo text,
   start_ts timestamptz not null,
@@ -39,9 +39,10 @@ alter publication supabase_realtime add table reservations;
 -- create policy "public update" on reservations for update using (true) with check (true);
 -- grant update on reservations to anon, authenticated;
 --
--- 기존 테이블에서 접견실을 없애고 그 자리를 "일정"으로 사용 (대회의실은 그대로 유지)
+-- 기존 테이블에서 회의실 이름 변경: 대회의실(기존 예약 포함)→일정, 접견실(빈 방)→대회의실
 -- (제약조건 이름이 실제와 달라도 에러 없이 넘어가도록 if exists 사용)
 -- alter table reservations drop constraint if exists reservations_room_check;
--- update reservations set room = '일정' where room = '접견실';
--- alter table reservations add constraint reservations_room_check check (room in ('대회의실','일정','회의실1','회의실2'));
+-- update reservations set room = '일정' where room = '대회의실';
+-- update reservations set room = '대회의실' where room = '접견실';
+-- alter table reservations add constraint reservations_room_check check (room in ('일정','대회의실','회의실1','회의실2'));
 -- ================================================================
