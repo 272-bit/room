@@ -216,6 +216,7 @@ const USERS = [
 ];
 const ROOMS = [
   { key: '일정', label: '일정', sub: '' },
+  { key: '통역', label: '통역', sub: '', weight: 0.6 },
   { key: '대회의실', label: '대회의실', sub: '' },
   { key: '회의실1', label: '회의실1', sub: '영업 앞' },
   { key: '회의실2', label: '회의실2', sub: '대회의실 옆' },
@@ -374,7 +375,7 @@ function renderView() {
   document.getElementById('navLabel').style.color = (view === 'day' ? weekdayColor(currentDate) : null) || 'var(--text)';
 
   const columns = view === 'day'
-    ? ROOMS.map(r => ({ key: r.key, title: r.label, sub: r.sub, dayBase: startOfDay(currentDate), room: r.key }))
+    ? ROOMS.map(r => ({ key: r.key, title: r.label, sub: r.sub, weight: r.weight || 1, dayBase: startOfDay(currentDate), room: r.key }))
     : (() => {
         const s = startOfWeek(currentDate);
         const room = ROOMS[currentRoomIdx].key;
@@ -386,7 +387,7 @@ function renderView() {
 
   // 헤더
   const colHeaders = document.getElementById('colHeaders');
-  colHeaders.style.gridTemplateColumns = '44px repeat('+columns.length+', minmax(0, 1fr))';
+  colHeaders.style.gridTemplateColumns = '44px ' + columns.map(c => 'minmax(0, '+(c.weight || 1)+'fr)').join(' ');
   colHeaders.innerHTML = '<div></div>' + columns.map(c => {
     const color = view === 'week' ? weekdayColor(c.dayBase) : null;
     const titleStyle = color ? ' style="color:'+color+'"' : '';
@@ -405,7 +406,7 @@ function renderView() {
 
     const wrap = document.createElement('div');
     wrap.className = 'segment-grid';
-    wrap.style.gridTemplateColumns = '44px repeat('+columns.length+', minmax(0, 1fr))';
+    wrap.style.gridTemplateColumns = '44px ' + columns.map(c => 'minmax(0, '+(c.weight || 1)+'fr)').join(' ');
 
     const timeCol = document.createElement('div');
     timeCol.className = 'time-col';
@@ -495,6 +496,7 @@ function renderBookingBars(segmentsMeta) {
           const titleLine = escapeHtml(u.name + (b.memo ? ' ' + b.memo : ''));
           const bar = document.createElement('div');
           bar.className = 'booking-bar';
+          bar.title = u.name + (b.memo ? ' ' + b.memo : '') + ' ' + fmtTime(s) + '-' + fmtTime(e);
           bar.style.top = (localStart*PPS) + 'px';
           bar.style.height = Math.max(PPS-3, (localEnd-localStart)*PPS-3) + 'px';
           bar.style.background = u.bg;
